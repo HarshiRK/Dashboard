@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import re
+import os
 
 st.set_page_config(page_title="Advanced Financial Dashboard", layout="wide")
 
@@ -92,7 +93,7 @@ if uploaded:
         st.error(err)
 
     else:
-        # --- LOAD MAPPING ---
+        # --- LOAD BASE MAPPING ---
         if mapping_file:
             map_df = pd.read_csv(mapping_file)
             mapping_dict = {
@@ -102,173 +103,107 @@ if uploaded:
         else:
             mapping_dict = {}
 
+        # --- LOAD LEARNED MAPPING ---
+        if os.path.exists("learned_mapping.csv"):
+            learned_df = pd.read_csv("learned_mapping.csv")
+            learned_dict = {
+                str(row['Account']).lower().strip(): row['Category']
+                for _, row in learned_df.iterrows()
+            }
+        else:
+            learned_dict = {}
+
         # --- SMART CATEGORY ---
         def smart_cat(x):
             original = str(x).lower().strip()
             cleaned = re.sub(r'[^a-z0-9 ]', ' ', original)
 
+            # spelling fixes
+            cleaned = cleaned.replace("maintanance", "maintenance")
+            cleaned = cleaned.replace("insurence", "insurance")
+            cleaned = cleaned.replace("interst", "interest")
+            cleaned = cleaned.replace("taxes", "tax")
+            cleaned = cleaned.replace("charges", "charge")
+
+            # learned mapping first
+            if original in learned_dict:
+                return learned_dict[original]
+
             words = cleaned.split()
             words = [w[:-1] if w.endswith('s') else w for w in words]
             cleaned = " ".join(words)
 
+            # base mapping
             for key in sorted(mapping_dict.keys(), key=len, reverse=True):
-                key_clean = re.sub(r'[^a-z0-9 ]', ' ', key)
-                key_words = key_clean.split()
-                key_words = [w[:-1] if w.endswith('s') else w for w in key_words]
-                key_clean = " ".join(key_words)
-
-                if key_clean in cleaned or key in original:
+                if key in cleaned:
                     return mapping_dict[key]
 
-            for word in words:
-                for key in mapping_dict:
-                    if word in key:
-                        return mapping_dict[key]
-
-            if any(i in cleaned for i in ['cash','bank','receivable','debtor','inventory','stock','furniture','fixture','vehicle','equipment','asset','deposit','investment']):
+            # keyword fallback
+            if any(i in cleaned for i in ['cash','bank','receivable','debtor','inventory','stock','furniture','vehicle','equipment','asset']):
                 return 'Assets'
-
-            if any(i in cleaned for i in ['loan','payable','creditor','capital','reserve','liability','provision']):
+            if any(i in cleaned for i in ['loan','payable','creditor','capital','reserve','liability']):
                 return 'Liabilities'
-
-            if any(i in cleaned for i in ['sale','income','revenue','interest','commission']):
+            if any(i in cleaned for i in ['sale','income','revenue','interest']):
                 return 'Revenue'
-
-            if any(i in cleaned for i in [
-                'expense','rent','salary','wage','cost','tax','insurance',
-                'maintenance','repair','professional','consultancy',
-                'courier','transport','printing','internet',
-                'depreciation','amortisation','penalty',
-                'electricity','telephone','office','admin',
-                'bonus','welfare','charges'
-            ]):
+            if any(i in cleaned for i in ['expense','salary','rent','tax','insurance','maintenance','professional','charge']):
                 return 'Expenses'
 
             return "Others"
 
         data['Category'] = data['Account'].apply(smart_cat)
 
-        st.write("Unmapped Accounts:", data[data['Category']=="Others"]['Account'].unique())
+        # --- AUTO LEARNING UI ---
+        st.subheader("🧠 Auto-Learning Mapping")
+
+        unmapped = data[data['Category']=="Others"]['Account'].unique()
+
+        if len(unmapped) > 0:
+            for acc in unmapped:
+                col1, col2 = st.columns([3,1])
+                with col1:
+                    cat = st.selectbox(f"Map: {acc}", ["Assets","Liabilities","Revenue","Expenses"], key=acc)
+                with col2:
+                    if st.button(f"Save", key=f"btn_{acc}"):
+                        new_row = pd.DataFrame([[acc, cat]], columns=['Account','Category'])
+                        new_row.to_csv("learned_mapping.csv", mode='a', header=not os.path.exists("learned_mapping.csv"), index=False)
+                        st.success(f"{acc} saved! Refresh app.")
+
+        else:
+            st.success("🎉 No unmapped accounts!")
+
+        st.divider()
 
         # --- MONTH FILTER ---
         months = list(data['Month'].unique())
-
         sel_month = st.sidebar.selectbox("Select Month", months)
         compare_month = st.sidebar.selectbox("Compare With", months)
 
         view = data[data['Month'] == sel_month]
         prev_view = data[data['Month'] == compare_month]
 
-        # --- CORE VALUES ---
+        # --- CORE VALUES (CORRECT LOGIC) ---
+        revenue = -view[view['Category'] == 'Revenue']['Amount'].sum()
+        expenses = view[view['Category'] == 'Expenses']['Amount'].sum()
         assets = abs(view[view['Category'] == 'Assets']['Amount'].sum())
         liab = abs(view[view['Category'] == 'Liabilities']['Amount'].sum())
-        revenue = abs(view[view['Category'] == 'Revenue']['Amount'].sum())
-        expenses = abs(view[view['Category'] == 'Expenses']['Amount'].sum())
-        prev_revenue = abs(prev_view[prev_view['Category'] == 'Revenue']['Amount'].sum())
+        prev_revenue = -prev_view[prev_view['Category'] == 'Revenue']['Amount'].sum()
 
         profit = revenue - expenses
 
-        # --- RATIOS ---
+        # --- KPIs ---
         expense_ratio = (expenses / revenue * 100) if revenue else 0
-        revenue_growth = ((revenue - prev_revenue) / prev_revenue * 100) if prev_revenue else 0
         profit_margin = (profit / revenue * 100) if revenue else 0
-        asset_turnover = (revenue / assets) if assets else 0
-        debt_ratio = (liab / assets) if assets else 0
-        efficiency_ratio = (revenue / expenses) if expenses else 0
+        revenue_growth = ((revenue - prev_revenue) / prev_revenue * 100) if prev_revenue else 0
 
-        # --- KPI SELECTOR ---
-        kpi_options = [
-            "Profit","Profit Margin","Expense Ratio",
-            "Revenue Growth","Asset Turnover",
-            "Debt Ratio","Efficiency Ratio"
-        ]
+        st.subheader("📈 KPIs")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Profit", f"₹{profit:,.0f}")
+        c2.metric("Profit Margin", f"{profit_margin:.1f}%")
+        c3.metric("Expense Ratio", f"{expense_ratio:.1f}%")
 
-        selected_kpis = st.sidebar.multiselect(
-            "Select KPIs",
-            kpi_options,
-            default=["Profit","Profit Margin"]
-        )
-
-        st.subheader("📈 Key Performance Indicators")
-
-        cols = st.columns(len(selected_kpis))
-
-        for i, kpi in enumerate(selected_kpis):
-            if kpi == "Profit":
-                cols[i].metric("Profit", f"₹{profit:,.0f}")
-            elif kpi == "Profit Margin":
-                cols[i].metric("Profit Margin", f"{profit_margin:.1f}%")
-            elif kpi == "Expense Ratio":
-                cols[i].metric("Expense Ratio", f"{expense_ratio:.1f}%")
-            elif kpi == "Revenue Growth":
-                cols[i].metric("Revenue Growth", f"{revenue_growth:.1f}%")
-            elif kpi == "Asset Turnover":
-                cols[i].metric("Asset Turnover", f"{asset_turnover:.2f}")
-            elif kpi == "Debt Ratio":
-                cols[i].metric("Debt Ratio", f"{debt_ratio:.2f}")
-            elif kpi == "Efficiency Ratio":
-                cols[i].metric("Efficiency Ratio", f"{efficiency_ratio:.2f}")
-
-        st.divider()
-
-        # --- VARIANCE ---
-        st.subheader("📊 Variance Analysis")
-
-        current_summary = view.groupby('Category')['Amount'].sum()
-        prev_summary = prev_view.groupby('Category')['Amount'].sum()
-
-        variance_df = pd.DataFrame({
-            'Current': current_summary,
-            'Previous': prev_summary
-        }).fillna(0)
-
-        variance_df['Change'] = variance_df['Current'] - variance_df['Previous']
-        variance_df['% Change'] = variance_df.apply(
-            lambda x: (x['Change'] / x['Previous'] * 100) if x['Previous'] != 0 else 0,
-            axis=1
-        )
-
-        st.dataframe(variance_df)
-
-        st.divider()
-
-        # --- AUTO INSIGHTS ---
-        st.subheader("🧠 Auto Insights")
-
-        if revenue_growth > 20:
-            st.write("📈 Revenue increased strongly")
-        elif revenue_growth < -10:
-            st.write("📉 Revenue declined")
-
-        if expense_ratio > 100:
-            st.write("🚨 Expenses exceed revenue")
-
-        if profit > 0:
-            st.write("✅ Profitable business")
-        else:
-            st.write("❌ Loss making business")
-
-        if asset_turnover < 0.5:
-            st.write("⚠️ Low asset utilization")
-
-        if liab > assets:
-            st.write("⚠️ High financial risk")
-
-        st.divider()
-
-        # --- CHARTS ---
-        col1, col2 = st.columns(2)
-
-        with col1:
-            fig = px.pie(view, values=view['Amount'].abs(), names='Category', hole=0.4)
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
-            trend = data.groupby('Month')['Amount'].sum().reset_index()
-            fig2 = px.line(trend, x='Month', y='Amount', markers=True)
-            st.plotly_chart(fig2, use_container_width=True)
-
-        st.divider()
+        # --- CHART ---
+        fig = px.pie(view, values=view['Amount'].abs(), names='Category')
+        st.plotly_chart(fig, use_container_width=True)
 
         # --- TABLE ---
         st.subheader("Detailed Data")
