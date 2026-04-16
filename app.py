@@ -10,11 +10,14 @@ def clean_to_float(v):
     if pd.isna(v) or str(v).strip() == "":
         return 0.0
     
-    s = str(v)
-    s = re.sub(r'[^0-9.-]', '', s)
-
+    s = str(v).upper().strip()
+    is_credit = any(x in s for x in ["CR", "-", "("])
+    
+    s = re.sub(r'[^0-9.]', '', s)
+    
     try:
-        return float(s)
+        val = float(s) if s else 0.0
+        return -val if is_credit else val
     except:
         return 0.0
 
@@ -57,7 +60,7 @@ def universal_parser(file):
                 for c in range(i, acc_col - 1, -1):
                     cell = str(df.iloc[r, c]).lower()
                     if any(m in cell for m in month_keywords):
-                        month = str(df.iloc[r, c]).strip()
+                        month = df.iloc[r, c]
                         break
 
             temp = pd.DataFrame()
@@ -77,6 +80,7 @@ def universal_parser(file):
 
 # --- UI ---
 st.title("📊 Advanced Financial Dashboard")
+st.markdown("Smart MIS Dashboard with Insights 🚀")
 
 uploaded = st.sidebar.file_uploader("Upload Trial Balance CSV", type="csv")
 mapping_file = st.sidebar.file_uploader("Upload Mapping File", type="csv")
@@ -98,42 +102,49 @@ if uploaded:
         else:
             mapping_dict = {}
 
-        # --- SMART CATEGORY (OLD WORKING LOGIC) ---
+        # --- STRONG SMART CATEGORY ---
         def smart_cat(x):
-            x_str = str(x).lower().strip()
-            x_str = re.sub(r'[^a-z0-9 ]', ' ', x_str)
+            original = str(x).lower().strip()
+            cleaned = re.sub(r'[^a-z0-9 ]', ' ', original)
 
-            # Fix spelling issues
-            x_str = x_str.replace("maintanance", "maintenance")
-            x_str = x_str.replace("insurence", "insurance")
-            x_str = x_str.replace("interst", "interest")
-
-            # singular/plural fix
-            words = x_str.split()
+            # normalize
+            words = cleaned.split()
             words = [w[:-1] if w.endswith('s') else w for w in words]
-            x_str = " ".join(words)
+            cleaned = " ".join(words)
 
-            # --- STEP 1: MAPPING FILE ---
+            # --- STEP 1: EXACT / CLEAN MATCH ---
             for key in sorted(mapping_dict.keys(), key=len, reverse=True):
-                if key in x_str:
+                key_clean = re.sub(r'[^a-z0-9 ]', ' ', key)
+                key_words = key_clean.split()
+                key_words = [w[:-1] if w.endswith('s') else w for w in key_words]
+                key_clean = " ".join(key_words)
+
+                if key_clean in cleaned or key in original:
                     return mapping_dict[key]
 
-            # --- STEP 2: KEYWORD FALLBACK ---
-            if any(i in x_str for i in ['cash','bank','receivable','debtor','asset','inventory','stock','deposit','investment','equipment','vehicle','furniture']):
+            # --- STEP 2: WORD LEVEL MATCH ---
+            for word in words:
+                for key in mapping_dict:
+                    if word in key:
+                        return mapping_dict[key]
+
+            # --- STEP 3: STRONG KEYWORD FALLBACK ---
+            if any(i in cleaned for i in ['cash','bank','receivable','debtor','inventory','stock','furniture','fixture','vehicle','equipment','asset','deposit','investment']):
                 return 'Assets'
 
-            if any(i in x_str for i in ['payable','creditor','loan','liability','capital','reserve','provision']):
+            if any(i in cleaned for i in ['loan','payable','creditor','capital','reserve','liability','provision']):
                 return 'Liabilities'
 
-            if any(i in x_str for i in ['sale','revenue','income','interest received','commission']):
+            if any(i in cleaned for i in ['sale','income','revenue','interest','commission']):
                 return 'Revenue'
 
-            if any(i in x_str for i in [
-                'expense','charges','cost','rent','salary','wage','supplie',
-                'tax','insurance','maintenance','repair','professional',
-                'consultancy','courier','transport','printing','internet',
-                'depreciation','amortisation','interest paid','penalty',
-                'electricity','telephone','office','admin'
+            if any(i in cleaned for i in [
+                'expense','rent','salary','wage','cost','tax','insurance',
+                'maintenance','repair','professional','consultancy',
+                'courier','transport','printing','internet',
+                'depreciation','amortisation','penalty',
+                'electricity','telephone','office','admin',
+                'bonus','welfare','charges'
             ]):
                 return 'Expenses'
 
@@ -143,7 +154,7 @@ if uploaded:
 
         st.write("Unmapped Accounts:", data[data['Category']=="Others"]['Account'].unique())
 
-        # --- MONTH FILTER ---
+        # --- MONTH ---
         months = list(data['Month'].unique())
 
         sel_month = st.sidebar.selectbox("Select Month", months)
@@ -152,73 +163,22 @@ if uploaded:
         view = data[data['Month'] == sel_month]
         prev_view = data[data['Month'] == compare_month]
 
-        # --- CORRECT SIGN HANDLING ---
-        assets = view[view['Category'] == 'Assets']['Amount'].sum()
-        liabilities = -view[view['Category'] == 'Liabilities']['Amount'].sum()
+        # --- METRICS ---
+        assets = abs(view[view['Category'] == 'Assets']['Amount'].sum())
+        liab = abs(view[view['Category'] == 'Liabilities']['Amount'].sum())
 
-        revenue = -view[view['Category'] == 'Revenue']['Amount'].sum()
-        expenses = view[view['Category'] == 'Expenses']['Amount'].sum()
+        st.metric("Assets", f"₹{assets:,.0f}")
+        st.metric("Liabilities", f"₹{liab:,.0f}")
 
-        prev_revenue = -prev_view[prev_view['Category'] == 'Revenue']['Amount'].sum()
+        revenue = abs(view[view['Category'] == 'Revenue']['Amount'].sum())
+        expenses = abs(view[view['Category'] == 'Expenses']['Amount'].sum())
+        prev_revenue = abs(prev_view[prev_view['Category'] == 'Revenue']['Amount'].sum())
 
         profit = revenue - expenses
 
-        # --- RATIOS ---
-        expense_ratio = (expenses / revenue * 100) if revenue != 0 else 0
-        revenue_growth = ((revenue - prev_revenue) / prev_revenue * 100) if prev_revenue != 0 else 0
-        profit_margin = (profit / revenue * 100) if revenue != 0 else 0
-        asset_turnover = (revenue / assets) if assets != 0 else 0
-        debt_ratio = (liabilities / assets) if assets != 0 else 0
-        efficiency_ratio = (revenue / expenses) if expenses != 0 else 0
-
-        # --- KPI SELECTOR ---
-        kpi_options = [
-            "Profit","Profit Margin","Expense Ratio",
-            "Revenue Growth","Asset Turnover",
-            "Debt Ratio","Efficiency Ratio"
-        ]
-
-        selected_kpis = st.sidebar.multiselect(
-            "Select KPIs",
-            kpi_options,
-            default=["Profit","Profit Margin"]
-        )
-
-        st.subheader("📈 Key Performance Indicators")
-
-        k_cols = st.columns(len(selected_kpis))
-
-        for i, kpi in enumerate(selected_kpis):
-            if kpi == "Profit":
-                k_cols[i].metric("Profit", f"₹{profit:,.0f}")
-            elif kpi == "Profit Margin":
-                k_cols[i].metric("Profit Margin", f"{profit_margin:.1f}%")
-            elif kpi == "Expense Ratio":
-                k_cols[i].metric("Expense Ratio", f"{expense_ratio:.1f}%")
-            elif kpi == "Revenue Growth":
-                k_cols[i].metric("Revenue Growth", f"{revenue_growth:.1f}%")
-            elif kpi == "Asset Turnover":
-                k_cols[i].metric("Asset Turnover", f"{asset_turnover:.2f}")
-            elif kpi == "Debt Ratio":
-                k_cols[i].metric("Debt Ratio", f"{debt_ratio:.2f}")
-            elif kpi == "Efficiency Ratio":
-                k_cols[i].metric("Efficiency Ratio", f"{efficiency_ratio:.2f}")
-
-        st.divider()
-
-        # --- CHARTS ---
-        col1, col2 = st.columns(2)
-
-        with col1:
-            fig = px.pie(view, values=view['Amount'].abs(), names='Category')
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
-            trend = data.groupby('Month')['Amount'].sum().reset_index()
-            fig2 = px.line(trend, x='Month', y='Amount')
-            st.plotly_chart(fig2, use_container_width=True)
-
-        st.divider()
+        st.subheader("📈 KPIs")
+        st.write(f"Profit: ₹{profit:,.0f}")
+        st.write(f"Profit Margin: {(profit/revenue*100) if revenue else 0:.1f}%")
 
         st.subheader("Detailed Data")
         st.dataframe(view[['Account','Category','Amount']], use_container_width=True)
