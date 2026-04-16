@@ -5,19 +5,16 @@ import re
 
 st.set_page_config(page_title="Advanced Financial Dashboard", layout="wide")
 
-# --- CLEAN FUNCTION ---
+# --- CLEAN FUNCTION (NO DR/CR LOGIC HERE) ---
 def clean_to_float(v):
     if pd.isna(v) or str(v).strip() == "":
         return 0.0
     
-    s = str(v).upper().strip()
-    is_credit = any(x in s for x in ["CR", "-", "("])
-    
-    s = re.sub(r'[^0-9.]', '', s)
-    
+    s = str(v)
+    s = re.sub(r'[^0-9.-]', '', s)
+
     try:
-        val = float(s) if s else 0.0
-        return -val if is_credit else val
+        return float(s)
     except:
         return 0.0
 
@@ -106,7 +103,6 @@ if uploaded:
             x_str = str(x).lower().strip()
             x_str = re.sub(r'[^a-z0-9 ]', ' ', x_str)
 
-            # Fix spelling
             x_str = x_str.replace("maintanance", "maintenance")
             x_str = x_str.replace("insurence", "insurance")
             x_str = x_str.replace("interst", "interest")
@@ -115,29 +111,24 @@ if uploaded:
             words = [w[:-1] if w.endswith('s') else w for w in words]
             x_str = " ".join(words)
 
-            # --- Mapping file ---
             for key in sorted(mapping_dict.keys(), key=len, reverse=True):
                 if key in x_str:
                     return mapping_dict[key]
 
-            # --- Fallback logic ---
-            if any(i in x_str for i in ['receivable', 'debtor', 'deposit', 'investment']):
+            # fallback
+            if any(i in x_str for i in ['receivable','debtor','deposit','investment']):
                 return 'Assets'
-            
-            if any(i in x_str for i in ['creditor', 'payable', 'loan', 'liability']):
+            if any(i in x_str for i in ['creditor','payable','loan']):
                 return 'Liabilities'
-            
-            if any(i in x_str for i in ['sale', 'income', 'interest received']):
+            if any(i in x_str for i in ['sale','income','interest received']):
                 return 'Revenue'
-            
-            if any(i in x_str for i in ['expense', 'charges', 'cost', 'supplies']):
+            if any(i in x_str for i in ['expense','charges','cost','supplies']):
                 return 'Expenses'
 
             return "Others"
 
         data['Category'] = data['Account'].apply(smart_cat)
 
-        # --- DEBUG ---
         st.write("Unmapped Accounts:", data[data['Category']=="Others"]['Account'].unique())
 
         # --- MONTH FILTER ---
@@ -149,39 +140,36 @@ if uploaded:
         view = data[data['Month'] == sel_month]
         prev_view = data[data['Month'] == compare_month]
 
-        # --- CALCULATIONS ---
-        assets = abs(view[view['Category'] == 'Assets']['Amount'].sum())
-        liab = abs(view[view['Category'] == 'Liabilities']['Amount'].sum())
+        # --- CORRECT SIGN HANDLING ---
+        assets = view[view['Category'] == 'Assets']['Amount'].sum()
+        liabilities = -view[view['Category'] == 'Liabilities']['Amount'].sum()
 
-        revenue = abs(view[view['Category'] == 'Revenue']['Amount'].sum())
-        expenses = abs(view[view['Category'] == 'Expenses']['Amount'].sum())
+        revenue = -view[view['Category'] == 'Revenue']['Amount'].sum()
+        expenses = view[view['Category'] == 'Expenses']['Amount'].sum()
 
-        prev_revenue = abs(prev_view[prev_view['Category'] == 'Revenue']['Amount'].sum())
+        prev_revenue = -prev_view[prev_view['Category'] == 'Revenue']['Amount'].sum()
 
         profit = revenue - expenses
 
+        # --- RATIOS ---
         expense_ratio = (expenses / revenue * 100) if revenue != 0 else 0
         revenue_growth = ((revenue - prev_revenue) / prev_revenue * 100) if prev_revenue != 0 else 0
         profit_margin = (profit / revenue * 100) if revenue != 0 else 0
         asset_turnover = (revenue / assets) if assets != 0 else 0
-        debt_ratio = (liab / assets) if assets != 0 else 0
+        debt_ratio = (liabilities / assets) if assets != 0 else 0
         efficiency_ratio = (revenue / expenses) if expenses != 0 else 0
 
         # --- KPI SELECTOR ---
         kpi_options = [
-            "Profit",
-            "Profit Margin",
-            "Expense Ratio",
-            "Revenue Growth",
-            "Asset Turnover",
-            "Debt Ratio",
-            "Efficiency Ratio"
+            "Profit","Profit Margin","Expense Ratio",
+            "Revenue Growth","Asset Turnover",
+            "Debt Ratio","Efficiency Ratio"
         ]
 
         selected_kpis = st.sidebar.multiselect(
             "Select KPIs",
             kpi_options,
-            default=["Profit", "Profit Margin"]
+            default=["Profit","Profit Margin"]
         )
 
         st.subheader("📈 Key Performance Indicators")
@@ -191,22 +179,16 @@ if uploaded:
         for i, kpi in enumerate(selected_kpis):
             if kpi == "Profit":
                 k_cols[i].metric("Profit", f"₹{profit:,.0f}")
-
             elif kpi == "Profit Margin":
                 k_cols[i].metric("Profit Margin", f"{profit_margin:.1f}%")
-
             elif kpi == "Expense Ratio":
                 k_cols[i].metric("Expense Ratio", f"{expense_ratio:.1f}%")
-
             elif kpi == "Revenue Growth":
                 k_cols[i].metric("Revenue Growth", f"{revenue_growth:.1f}%")
-
             elif kpi == "Asset Turnover":
                 k_cols[i].metric("Asset Turnover", f"{asset_turnover:.2f}")
-
             elif kpi == "Debt Ratio":
                 k_cols[i].metric("Debt Ratio", f"{debt_ratio:.2f}")
-
             elif kpi == "Efficiency Ratio":
                 k_cols[i].metric("Efficiency Ratio", f"{efficiency_ratio:.2f}")
 
@@ -226,7 +208,7 @@ if uploaded:
         if asset_turnover < 0.5:
             st.write("⚠️ Low asset utilization.")
 
-        if liab > assets:
+        if liabilities > assets:
             st.write("⚠️ Liabilities exceed assets.")
 
         st.divider()
