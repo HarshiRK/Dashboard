@@ -98,7 +98,7 @@ if uploaded:
         else:
             mapping_dict = {}
 
-        # --- SMART CATEGORY ---
+        # --- SMART CATEGORY (OLD WORKING LOGIC) ---
         def smart_cat(x):
             x_str = str(x).lower().strip()
             x_str = re.sub(r'[^a-z0-9 ]', ' ', x_str)
@@ -108,30 +108,32 @@ if uploaded:
             x_str = x_str.replace("insurence", "insurance")
             x_str = x_str.replace("interst", "interest")
 
+            # singular/plural fix
             words = x_str.split()
             words = [w[:-1] if w.endswith('s') else w for w in words]
             x_str = " ".join(words)
 
-            # --- Mapping file ---
+            # --- STEP 1: MAPPING FILE ---
             for key in sorted(mapping_dict.keys(), key=len, reverse=True):
                 if key in x_str:
                     return mapping_dict[key]
 
-            # --- Strong fallback ---
-            if any(i in x_str for i in ['cash','bank','receivable','debtor','asset','inventory','stock','deposit','investment']):
+            # --- STEP 2: KEYWORD FALLBACK ---
+            if any(i in x_str for i in ['cash','bank','receivable','debtor','asset','inventory','stock','deposit','investment','equipment','vehicle','furniture']):
                 return 'Assets'
 
-            if any(i in x_str for i in ['payable','creditor','loan','liability','capital','reserve']):
+            if any(i in x_str for i in ['payable','creditor','loan','liability','capital','reserve','provision']):
                 return 'Liabilities'
 
-            if any(i in x_str for i in ['sale','revenue','income','interest received']):
+            if any(i in x_str for i in ['sale','revenue','income','interest received','commission']):
                 return 'Revenue'
 
             if any(i in x_str for i in [
-                'expense','charges','cost','rent','salary','wages','supplies',
+                'expense','charges','cost','rent','salary','wage','supplie',
                 'tax','insurance','maintenance','repair','professional',
                 'consultancy','courier','transport','printing','internet',
-                'depreciation','amortisation','interest paid','penalty'
+                'depreciation','amortisation','interest paid','penalty',
+                'electricity','telephone','office','admin'
             ]):
                 return 'Expenses'
 
@@ -204,25 +206,6 @@ if uploaded:
 
         st.divider()
 
-        # --- INSIGHTS ---
-        st.subheader("🧠 Auto Insights")
-
-        if profit > 0:
-            st.write("✅ Business is profitable.")
-        else:
-            st.write("❌ Business is making a loss.")
-
-        if expense_ratio > 100:
-            st.write("🚨 Expenses exceed revenue.")
-
-        if asset_turnover < 0.5:
-            st.write("⚠️ Low asset utilization.")
-
-        if liabilities > assets:
-            st.write("⚠️ Liabilities exceed assets.")
-
-        st.divider()
-
         # --- CHARTS ---
         col1, col2 = st.columns(2)
 
@@ -237,6 +220,5 @@ if uploaded:
 
         st.divider()
 
-        # --- TABLE ---
         st.subheader("Detailed Data")
         st.dataframe(view[['Account','Category','Amount']], use_container_width=True)
