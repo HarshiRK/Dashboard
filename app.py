@@ -102,17 +102,15 @@ if uploaded:
         else:
             mapping_dict = {}
 
-        # --- STRONG SMART CATEGORY ---
+        # --- SMART CATEGORY ---
         def smart_cat(x):
             original = str(x).lower().strip()
             cleaned = re.sub(r'[^a-z0-9 ]', ' ', original)
 
-            # normalize
             words = cleaned.split()
             words = [w[:-1] if w.endswith('s') else w for w in words]
             cleaned = " ".join(words)
 
-            # --- STEP 1: EXACT / CLEAN MATCH ---
             for key in sorted(mapping_dict.keys(), key=len, reverse=True):
                 key_clean = re.sub(r'[^a-z0-9 ]', ' ', key)
                 key_words = key_clean.split()
@@ -122,13 +120,11 @@ if uploaded:
                 if key_clean in cleaned or key in original:
                     return mapping_dict[key]
 
-            # --- STEP 2: WORD LEVEL MATCH ---
             for word in words:
                 for key in mapping_dict:
                     if word in key:
                         return mapping_dict[key]
 
-            # --- STEP 3: STRONG KEYWORD FALLBACK ---
             if any(i in cleaned for i in ['cash','bank','receivable','debtor','inventory','stock','furniture','fixture','vehicle','equipment','asset','deposit','investment']):
                 return 'Assets'
 
@@ -154,7 +150,7 @@ if uploaded:
 
         st.write("Unmapped Accounts:", data[data['Category']=="Others"]['Account'].unique())
 
-        # --- MONTH ---
+        # --- MONTH FILTER ---
         months = list(data['Month'].unique())
 
         sel_month = st.sidebar.selectbox("Select Month", months)
@@ -163,22 +159,117 @@ if uploaded:
         view = data[data['Month'] == sel_month]
         prev_view = data[data['Month'] == compare_month]
 
-        # --- METRICS ---
+        # --- CORE VALUES ---
         assets = abs(view[view['Category'] == 'Assets']['Amount'].sum())
         liab = abs(view[view['Category'] == 'Liabilities']['Amount'].sum())
-
-        st.metric("Assets", f"₹{assets:,.0f}")
-        st.metric("Liabilities", f"₹{liab:,.0f}")
-
         revenue = abs(view[view['Category'] == 'Revenue']['Amount'].sum())
         expenses = abs(view[view['Category'] == 'Expenses']['Amount'].sum())
         prev_revenue = abs(prev_view[prev_view['Category'] == 'Revenue']['Amount'].sum())
 
         profit = revenue - expenses
 
-        st.subheader("📈 KPIs")
-        st.write(f"Profit: ₹{profit:,.0f}")
-        st.write(f"Profit Margin: {(profit/revenue*100) if revenue else 0:.1f}%")
+        # --- RATIOS ---
+        expense_ratio = (expenses / revenue * 100) if revenue else 0
+        revenue_growth = ((revenue - prev_revenue) / prev_revenue * 100) if prev_revenue else 0
+        profit_margin = (profit / revenue * 100) if revenue else 0
+        asset_turnover = (revenue / assets) if assets else 0
+        debt_ratio = (liab / assets) if assets else 0
+        efficiency_ratio = (revenue / expenses) if expenses else 0
 
+        # --- KPI SELECTOR ---
+        kpi_options = [
+            "Profit","Profit Margin","Expense Ratio",
+            "Revenue Growth","Asset Turnover",
+            "Debt Ratio","Efficiency Ratio"
+        ]
+
+        selected_kpis = st.sidebar.multiselect(
+            "Select KPIs",
+            kpi_options,
+            default=["Profit","Profit Margin"]
+        )
+
+        st.subheader("📈 Key Performance Indicators")
+
+        cols = st.columns(len(selected_kpis))
+
+        for i, kpi in enumerate(selected_kpis):
+            if kpi == "Profit":
+                cols[i].metric("Profit", f"₹{profit:,.0f}")
+            elif kpi == "Profit Margin":
+                cols[i].metric("Profit Margin", f"{profit_margin:.1f}%")
+            elif kpi == "Expense Ratio":
+                cols[i].metric("Expense Ratio", f"{expense_ratio:.1f}%")
+            elif kpi == "Revenue Growth":
+                cols[i].metric("Revenue Growth", f"{revenue_growth:.1f}%")
+            elif kpi == "Asset Turnover":
+                cols[i].metric("Asset Turnover", f"{asset_turnover:.2f}")
+            elif kpi == "Debt Ratio":
+                cols[i].metric("Debt Ratio", f"{debt_ratio:.2f}")
+            elif kpi == "Efficiency Ratio":
+                cols[i].metric("Efficiency Ratio", f"{efficiency_ratio:.2f}")
+
+        st.divider()
+
+        # --- VARIANCE ---
+        st.subheader("📊 Variance Analysis")
+
+        current_summary = view.groupby('Category')['Amount'].sum()
+        prev_summary = prev_view.groupby('Category')['Amount'].sum()
+
+        variance_df = pd.DataFrame({
+            'Current': current_summary,
+            'Previous': prev_summary
+        }).fillna(0)
+
+        variance_df['Change'] = variance_df['Current'] - variance_df['Previous']
+        variance_df['% Change'] = variance_df.apply(
+            lambda x: (x['Change'] / x['Previous'] * 100) if x['Previous'] != 0 else 0,
+            axis=1
+        )
+
+        st.dataframe(variance_df)
+
+        st.divider()
+
+        # --- AUTO INSIGHTS ---
+        st.subheader("🧠 Auto Insights")
+
+        if revenue_growth > 20:
+            st.write("📈 Revenue increased strongly")
+        elif revenue_growth < -10:
+            st.write("📉 Revenue declined")
+
+        if expense_ratio > 100:
+            st.write("🚨 Expenses exceed revenue")
+
+        if profit > 0:
+            st.write("✅ Profitable business")
+        else:
+            st.write("❌ Loss making business")
+
+        if asset_turnover < 0.5:
+            st.write("⚠️ Low asset utilization")
+
+        if liab > assets:
+            st.write("⚠️ High financial risk")
+
+        st.divider()
+
+        # --- CHARTS ---
+        col1, col2 = st.columns(2)
+
+        with col1:
+            fig = px.pie(view, values=view['Amount'].abs(), names='Category', hole=0.4)
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            trend = data.groupby('Month')['Amount'].sum().reset_index()
+            fig2 = px.line(trend, x='Month', y='Amount', markers=True)
+            st.plotly_chart(fig2, use_container_width=True)
+
+        st.divider()
+
+        # --- TABLE ---
         st.subheader("Detailed Data")
         st.dataframe(view[['Account','Category','Amount']], use_container_width=True)
