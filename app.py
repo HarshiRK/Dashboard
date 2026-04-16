@@ -60,7 +60,7 @@ def universal_parser(file):
                 for c in range(i, acc_col - 1, -1):
                     cell = str(df.iloc[r, c]).lower()
                     if any(m in cell for m in month_keywords):
-                        month = df.iloc[r, c]
+                        month = str(df.iloc[r, c]).strip()
                         break
 
             temp = pd.DataFrame()
@@ -101,12 +101,12 @@ if uploaded:
         else:
             mapping_dict = {}
 
-        # --- SMART CATEGORY FUNCTION ---
+        # --- SMART CATEGORY ---
         def smart_cat(x):
             x_str = str(x).lower().strip()
             x_str = re.sub(r'[^a-z0-9 ]', ' ', x_str)
 
-            # Fix spelling issues
+            # Fix spelling
             x_str = x_str.replace("maintanance", "maintenance")
             x_str = x_str.replace("insurence", "insurance")
             x_str = x_str.replace("interst", "interest")
@@ -115,9 +115,23 @@ if uploaded:
             words = [w[:-1] if w.endswith('s') else w for w in words]
             x_str = " ".join(words)
 
+            # --- Mapping file ---
             for key in sorted(mapping_dict.keys(), key=len, reverse=True):
                 if key in x_str:
                     return mapping_dict[key]
+
+            # --- Fallback logic ---
+            if any(i in x_str for i in ['receivable', 'debtor', 'deposit', 'investment']):
+                return 'Assets'
+            
+            if any(i in x_str for i in ['creditor', 'payable', 'loan', 'liability']):
+                return 'Liabilities'
+            
+            if any(i in x_str for i in ['sale', 'income', 'interest received']):
+                return 'Revenue'
+            
+            if any(i in x_str for i in ['expense', 'charges', 'cost', 'supplies']):
+                return 'Expenses'
 
             return "Others"
 
@@ -135,7 +149,7 @@ if uploaded:
         view = data[data['Month'] == sel_month]
         prev_view = data[data['Month'] == compare_month]
 
-        # --- KPI CALCULATIONS (FIXED) ---
+        # --- CALCULATIONS ---
         assets = abs(view[view['Category'] == 'Assets']['Amount'].sum())
         liab = abs(view[view['Category'] == 'Liabilities']['Amount'].sum())
 
@@ -198,7 +212,7 @@ if uploaded:
 
         st.divider()
 
-        # --- AUTO INSIGHTS ---
+        # --- INSIGHTS ---
         st.subheader("🧠 Auto Insights")
 
         if profit > 0:
