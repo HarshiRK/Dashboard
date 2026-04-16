@@ -5,7 +5,7 @@ import re
 
 st.set_page_config(page_title="Advanced Financial Dashboard", layout="wide")
 
-# --- CLEAN FUNCTION (NO DR/CR LOGIC HERE) ---
+# --- CLEAN FUNCTION ---
 def clean_to_float(v):
     if pd.isna(v) or str(v).strip() == "":
         return 0.0
@@ -103,6 +103,7 @@ if uploaded:
             x_str = str(x).lower().strip()
             x_str = re.sub(r'[^a-z0-9 ]', ' ', x_str)
 
+            # Fix spelling issues
             x_str = x_str.replace("maintanance", "maintenance")
             x_str = x_str.replace("insurence", "insurance")
             x_str = x_str.replace("interst", "interest")
@@ -111,18 +112,27 @@ if uploaded:
             words = [w[:-1] if w.endswith('s') else w for w in words]
             x_str = " ".join(words)
 
+            # --- Mapping file ---
             for key in sorted(mapping_dict.keys(), key=len, reverse=True):
                 if key in x_str:
                     return mapping_dict[key]
 
-            # fallback
-            if any(i in x_str for i in ['receivable','debtor','deposit','investment']):
+            # --- Strong fallback ---
+            if any(i in x_str for i in ['cash','bank','receivable','debtor','asset','inventory','stock','deposit','investment']):
                 return 'Assets'
-            if any(i in x_str for i in ['creditor','payable','loan']):
+
+            if any(i in x_str for i in ['payable','creditor','loan','liability','capital','reserve']):
                 return 'Liabilities'
-            if any(i in x_str for i in ['sale','income','interest received']):
+
+            if any(i in x_str for i in ['sale','revenue','income','interest received']):
                 return 'Revenue'
-            if any(i in x_str for i in ['expense','charges','cost','supplies']):
+
+            if any(i in x_str for i in [
+                'expense','charges','cost','rent','salary','wages','supplies',
+                'tax','insurance','maintenance','repair','professional',
+                'consultancy','courier','transport','printing','internet',
+                'depreciation','amortisation','interest paid','penalty'
+            ]):
                 return 'Expenses'
 
             return "Others"
